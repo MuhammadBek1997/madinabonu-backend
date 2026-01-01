@@ -31,7 +31,8 @@ class Video(Base):
     thumbnail_url = Column(String(500), nullable=True)
     duration = Column(Integer, nullable=True)  # soniyalarda
     category_id = Column(Integer, ForeignKey("video_categories.id"), nullable=True)
-    subject = Column(String(100), nullable=True)
+    subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=True)
+    teacher_id = Column(Integer, ForeignKey("teachers.id"), nullable=True)
     is_published = Column(Boolean, default=True)
     order = Column(Integer, default=0)
     views_count = Column(Integer, default=0)
@@ -40,6 +41,8 @@ class Video(Base):
 
     # Relationships
     category = relationship("VideoCategory", back_populates="videos")
+    subject = relationship("Subject", back_populates="videos")
+    teacher = relationship("Teacher", back_populates="videos")
 
     def __repr__(self):
         return f"<Video {self.title}>"

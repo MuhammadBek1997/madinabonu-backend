@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import Base, engine
-from app.routes import auth, videos, tests
+from app.routes import auth, videos, tests, teachers, subjects
 from datetime import datetime
 
 # Database tables yaratish
@@ -29,6 +29,8 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(videos.router)
 app.include_router(tests.router)
+app.include_router(teachers.router)
+app.include_router(subjects.router)
 
 @app.get("/")
 def health_check():
@@ -80,6 +82,8 @@ def api_info():
             "auth": "/auth",
             "videos": "/videos",
             "tests": "/tests",
+            "teachers": "/teachers",
+            "subjects": "/subjects",
             "docs": "/docs",
             "redoc": "/redoc"
         },

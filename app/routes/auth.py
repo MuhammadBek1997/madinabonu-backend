@@ -4,10 +4,13 @@ from datetime import timedelta
 from app.database import get_db
 from app.models.user import User
 from app.models.enums import UserRole
+from app.models.oauth import OAuthAccount, OAuthProvider
 from app.schemas.user import UserCreate, UserLogin, UserResponse, Token
+from app.schemas.oauth import OAuthLoginRequest, TokenResponse
 from app.utils import hash_password, verify_password, create_access_token, create_refresh_token
 from app.dependencies import get_current_user, require_admin, require_superadmin
 from app.config import settings
+from app.oauth_utils import verify_google_token, verify_apple_token, generate_username_from_email
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -329,3 +332,135 @@ async def change_user_role(
         "username": user.username,
         "new_role": user.role.value
     }
+
+# ============ OAUTH LOGIN (Google & Apple) ============
+
+@router.post("/oauth/login", response_model=TokenResponse)
+async def oauth_login(oauth_request: OAuthLoginRequest, db: Session = Depends(get_db)):
+    """
+    OAuth (Google/Apple) orqali login
+
+    **Public endpoint** - Google yoki Apple orqali ro'yxatdan o'tish/kirish.
+
+    - **provider**: "google" yoki "apple"
+    - **id_token**: OAuth provider dan olingan ID token
+    - **access_token**: Google uchun access token (ixtiyoriy)
+
+    **Flow:**
+    1. Mobile app Google/Apple SDK orqali user login qiladi
+    2. SDK ID token qaytaradi
+    3. Mobile bu endpointga ID token yuboradi
+    4. Backend token verify qilib user yaratadi/topib JWT token qaytaradi
+    """
+
+    provider = oauth_request.provider.lower()
+
+    if provider not in ["google", "apple"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Noto'g'ri provider. 'google' yoki 'apple' bo'lishi kerak."
+        )
+
+    # Token verification
+    user_info = None
+
+    if provider == "google":
+        user_info = await verify_google_token(
+            oauth_request.id_token,
+            oauth_request.access_token
+        )
+    elif provider == "apple":
+        user_info = await verify_apple_token(oauth_request.id_token)
+
+    if not user_info:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="OAuth token verification failed"
+        )
+
+    # OAuth account mavjudligini tekshirish
+    oauth_account = db.query(OAuthAccount).filter(
+        OAuthAccount.provider_user_id == user_info.provider_user_id,
+        OAuthAccount.provider == OAuthProvider[provider.upper()]
+    ).first()
+
+    if oauth_account:
+        # User allaqachon mavjud - login
+        user = oauth_account.user
+
+        # OAuth account ma'lumotlarini yangilash
+        if user_info.email:
+            oauth_account.email = user_info.email
+        if user_info.full_name:
+            oauth_account.full_name = user_info.full_name
+        if user_info.picture:
+            oauth_account.picture = user_info.picture
+
+        db.commit()
+    else:
+        # Yangi user yaratish
+        # Email orqali mavjud userni topishga harakat
+        user = None
+        if user_info.email:
+            user = db.query(User).filter(User.email == user_info.email).first()
+
+        if user:
+            # Email bo'yicha user topildi - OAuth account biriktirish
+            pass
+        else:
+            # Yangi user yaratish
+            username = generate_username_from_email(
+                user_info.email or "",
+                provider
+            )
+
+            # Username unique bo'lishi kerak
+            counter = 1
+            original_username = username
+            while db.query(User).filter(User.username == username).first():
+                username = f"{original_username}{counter}"
+                counter += 1
+
+            user = User(
+                username=username,
+                email=user_info.email,
+                full_name=user_info.full_name,
+                hashed_password=None,  # OAuth uchun parol yo'q
+                role=UserRole.CLIENT,
+                is_active=True
+            )
+
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
+        # OAuth account yaratish
+        new_oauth_account = OAuthAccount(
+            user_id=user.id,
+            provider=OAuthProvider[provider.upper()],
+            provider_user_id=user_info.provider_user_id,
+            email=user_info.email,
+            full_name=user_info.full_name,
+            picture=user_info.picture
+        )
+
+        db.add(new_oauth_account)
+        db.commit()
+
+    # Token yaratish
+    access_token = create_access_token(
+        data={"sub": user.username, "user_id": user.id, "role": user.role.value}
+    )
+    refresh_token = create_refresh_token(
+        data={"sub": user.username, "user_id": user.id}
+    )
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+        user_id=user.id,
+        username=user.username,
+        email=user.email,
+        role=user.role.value
+    )

@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Enum as SQLEnum
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 from app.models.enums import UserRole
@@ -11,11 +12,15 @@ class User(Base):
     username = Column(String(100), unique=True, index=True, nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=True)
     full_name = Column(String(255), nullable=True)
-    hashed_password = Column(String(255), nullable=False)
+    hashed_password = Column(String(255), nullable=True)  # OAuth uchun ixtiyoriy
     role = Column(SQLEnum(UserRole), default=UserRole.CLIENT, nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    teacher_profile = relationship("Teacher", back_populates="user", uselist=False)
+    oauth_accounts = relationship("OAuthAccount", back_populates="user")
 
     def __repr__(self):
         return f"<User {self.username} ({self.role})>"
