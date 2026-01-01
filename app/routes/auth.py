@@ -11,18 +11,20 @@ from app.config import settings
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    """
-    Yangi foydalanuvchi ro'yxatdan o'tkazish
+# ============ CLIENT REGISTRATION (Public) ============
 
-    - **username**: Noyob username (3-100 belgi)
+@router.post("/register/client", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register_client(user_data: UserCreate, db: Session = Depends(get_db)):
+    """
+    CLIENT (o'quvchi) ro'yxatdan o'tish
+
+    **Public endpoint** - har kim erkin ro'yxatdan o'tishi mumkin.
+    Avtomatik CLIENT roli beriladi.
+
+    - **username**: Noyob username
     - **password**: Parol (minimum 6 belgi)
     - **email**: Email (ixtiyoriy)
     - **full_name**: To'liq ism (ixtiyoriy)
-    - **role**: client (default), teacher, admin, superadmin
-
-    **Eslatma:** Admin va superadmin rollari faqat mavjud admin tomonidan berilishi mumkin
     """
 
     # Username mavjudligini tekshirish
@@ -49,19 +51,13 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
             detail="Parol kamida 6 belgidan iborat bo'lishi kerak"
         )
 
-    # Role tekshirish - oddiy foydalanuvchilar faqat CLIENT bo'lishi mumkin
-    # Admin/Teacher/Superadmin yaratish uchun alohida endpoint kerak
-    allowed_roles = [UserRole.CLIENT]
-    if user_data.role not in allowed_roles:
-        user_data.role = UserRole.CLIENT
-
-    # Yangi foydalanuvchi yaratish
+    # Yangi CLIENT yaratish
     new_user = User(
         username=user_data.username,
         email=user_data.email,
         full_name=user_data.full_name,
         hashed_password=hash_password(user_data.password),
-        role=user_data.role,
+        role=UserRole.CLIENT,
         is_active=True
     )
 
@@ -71,25 +67,20 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
 
     return new_user
 
-@router.post("/register-staff", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register_staff(
+# ============ TEACHER REGISTRATION (Admin+) ============
+
+@router.post("/register/teacher", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register_teacher(
     user_data: UserCreate,
     db: Session = Depends(get_db),
     current_admin: User = Depends(require_admin)
 ):
     """
-    Admin/Teacher yaratish (faqat admin uchun)
+    TEACHER yaratish
 
-    Faqat ADMIN yoki SUPERADMIN foydalanuvchilar teacher/admin yaratishi mumkin.
-    SUPERADMIN yaratish faqat mavjud SUPERADMIN tomonidan amalga oshiriladi.
+    **Faqat ADMIN va SUPERADMIN uchun.**
+    Yangi o'qituvchi hisobini yaratish.
     """
-
-    # SUPERADMIN yaratish faqat SUPERADMIN tomonidan
-    if user_data.role == UserRole.SUPERADMIN and current_admin.role != UserRole.SUPERADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Faqat superadmin boshqa superadmin yarata oladi"
-        )
 
     # Username mavjudligini tekshirish
     existing_user = db.query(User).filter(User.username == user_data.username).first()
@@ -108,13 +99,110 @@ async def register_staff(
                 detail="Bu email allaqachon ro'yxatdan o'tgan"
             )
 
-    # Yangi staff yaratish
+    # Yangi TEACHER yaratish
     new_user = User(
         username=user_data.username,
         email=user_data.email,
         full_name=user_data.full_name,
         hashed_password=hash_password(user_data.password),
-        role=user_data.role,
+        role=UserRole.TEACHER,
+        is_active=True
+    )
+
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    return new_user
+
+# ============ ADMIN REGISTRATION (Admin+) ============
+
+@router.post("/register/admin", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register_admin(
+    user_data: UserCreate,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(require_admin)
+):
+    """
+    ADMIN yaratish
+
+    **Faqat ADMIN va SUPERADMIN uchun.**
+    Yangi administrator hisobini yaratish.
+    """
+
+    # Username mavjudligini tekshirish
+    existing_user = db.query(User).filter(User.username == user_data.username).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bu username allaqachon ro'yxatdan o'tgan"
+        )
+
+    # Email mavjudligini tekshirish
+    if user_data.email:
+        existing_email = db.query(User).filter(User.email == user_data.email).first()
+        if existing_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Bu email allaqachon ro'yxatdan o'tgan"
+            )
+
+    # Yangi ADMIN yaratish
+    new_user = User(
+        username=user_data.username,
+        email=user_data.email,
+        full_name=user_data.full_name,
+        hashed_password=hash_password(user_data.password),
+        role=UserRole.ADMIN,
+        is_active=True
+    )
+
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    return new_user
+
+# ============ SUPERADMIN REGISTRATION (Superadmin only) ============
+
+@router.post("/register/superadmin", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register_superadmin(
+    user_data: UserCreate,
+    db: Session = Depends(get_db),
+    current_superadmin: User = Depends(require_superadmin)
+):
+    """
+    SUPERADMIN yaratish
+
+    **Faqat SUPERADMIN uchun.**
+    Yangi super administrator hisobini yaratish.
+    Eng yuqori xavfsizlik darajasi.
+    """
+
+    # Username mavjudligini tekshirish
+    existing_user = db.query(User).filter(User.username == user_data.username).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bu username allaqachon ro'yxatdan o'tgan"
+        )
+
+    # Email mavjudligini tekshirish
+    if user_data.email:
+        existing_email = db.query(User).filter(User.email == user_data.email).first()
+        if existing_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Bu email allaqachon ro'yxatdan o'tgan"
+            )
+
+    # Yangi SUPERADMIN yaratish
+    new_user = User(
+        username=user_data.username,
+        email=user_data.email,
+        full_name=user_data.full_name,
+        hashed_password=hash_password(user_data.password),
+        role=UserRole.SUPERADMIN,
         is_active=True
     )
 
