@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import Base, engine
 from app.routes import auth, videos, tests
+from datetime import datetime
 
 # Database tables yaratish
 Base.metadata.create_all(bind=engine)
@@ -31,12 +32,40 @@ app.include_router(tests.router)
 
 @app.get("/")
 def health_check():
-    """Health check endpoint"""
+    """
+    Health check endpoint
+
+    Frontend bu endpoint orqali serverni uyg'otishi mumkin.
+    Render sleep mode dan chiqish uchun birinchi request.
+    Timeout: 90 sekund tavsiya etiladi.
+    """
     return {
         "status": "ok",
         "app": settings.APP_NAME,
         "version": settings.API_VERSION,
-        "message": "Madinabonu Backend API ishlamoqda!"
+        "message": "Madinabonu Backend API ishlamoqda!",
+        "timestamp": datetime.utcnow().isoformat(),
+        "render_info": {
+            "free_plan": True,
+            "sleep_after_inactivity": "15 minutes",
+            "wake_up_time": "30-60 seconds",
+            "recommendation": "Use 90s timeout for first request"
+        }
+    }
+
+@app.get("/ping")
+def ping():
+    """
+    Ping endpoint - tez javob qaytaradi
+
+    Keep-alive uchun ishlatiladi.
+    Render sleep mode ga o'tishini oldini olish uchun
+    har 10 daqiqada ping qilish tavsiya etiladi.
+    """
+    return {
+        "pong": True,
+        "timestamp": datetime.utcnow().isoformat(),
+        "message": "Server active"
     }
 
 @app.get("/api/info")
@@ -46,6 +75,8 @@ def api_info():
         "app_name": settings.APP_NAME,
         "version": settings.API_VERSION,
         "endpoints": {
+            "health": "/",
+            "ping": "/ping",
             "auth": "/auth",
             "videos": "/videos",
             "tests": "/tests",
@@ -58,8 +89,15 @@ def api_info():
             "Video Courses Management",
             "Interactive Tests & Quizzes",
             "Progress Tracking",
-            "AWS S3 Integration"
-        ]
+            "AWS S3 Integration",
+            "Sleep-aware timeout handling"
+        ],
+        "deployment": {
+            "platform": "Render.com",
+            "plan": "Free",
+            "cold_start": "30-60s",
+            "recommended_timeout": "90s"
+        }
     }
 
 if __name__ == "__main__":
